@@ -25,9 +25,38 @@ class RADController:
         return df.to_dict(orient="records")
 
     @staticmethod
-    async def get_describe_totais_por_periodo(
+    async def get_describe_by_periodo(
         campus,
+        start_period,
+        end_period,
         session: AsyncSession,
     ):
-        return await service.describe_totais_homologados_por_periodo(session, campus)
+        return await service.describe_by_period(session, campus, start_period=start_period, end_period=end_period)
+    
+    @staticmethod
+    async def get_activities_distribution(
+        campus,
+        start_period,
+        end_period,
+        session: AsyncSession,
+    ):
+        return await service.activities_distribution(session, campus, start_period=start_period, end_period=end_period)
+    
+    @staticmethod
+    async def activites_by_period(
+        campus,
+        start_period,
+        end_period,
+        session: AsyncSession,
+    ):
+        return await service.activities_by_period(session=session, campus=campus, start_period=start_period, end_period=end_period)
+    
+    @staticmethod
+    async def docents_by_activity(
+        campus,
+        start_period,
+        end_period,
+        session: AsyncSession,
+    ):
+        return await service.docents_by_activity(session=session, campus=campus, start_period=start_period, end_period=end_period)
     

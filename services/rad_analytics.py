@@ -28,6 +28,7 @@ ACTIVITY_COLS = [
     "administracao_representacao",
 ]
 
+
 @dataclass
 class RADAnalyticsService:
     """
@@ -369,38 +370,44 @@ class RADAnalyticsService:
             .reset_index(drop=True)
         )
 
-    async def describe_totais_homologados_por_periodo(
+    async def describe_by_period(
         self,
         session: AsyncSession,
-        campus: Optional[Iterable[str]] = None,
+        campus: Optional[str] = None,
+        start_period: Optional[str] = None,
+        end_period: Optional[str] = None,
     ):
-        """
-        Descritivo por período apenas para 'total' de registros HOMOLOGADOS.
-        Retorna uma lista de dicts: [{"periodo": "...", "media": ..., "mediana": ..., ...}, ...]
-        """
         _, _, base = await self.load(session)
         df = base.copy()
 
-        # manter só homologados
+        periods = base["periodo_letivo"].unique().tolist()
+
         df = df[df["situacao"] == "Homologado"]
 
-        # filtro opcional por campus
         if campus:
-            df = df[df["campus"].isin(set(campus))]
+            df = df[df["campus"] == campus]
 
-        # nada para calcular?
+        if start_period in periods and end_period in periods:
+            start_idx = periods.index(start_period)
+            end_idx = periods.index(end_period)
+
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+
+            selected_periods = periods[start_idx : end_idx + 1]
+
+            df = df[df["periodo_letivo"].isin(selected_periods)]
+
         if df.empty or "total" not in df.columns or "periodo_letivo" not in df.columns:
             return []
 
-        # garantir numérico
         df = df.copy()
         df["total"] = pd.to_numeric(df["total"], errors="coerce")
 
-        # agrupar e calcular estatísticas do TOTAL por período
-        g = df.groupby("periodo_letivo", dropna=True)
+        grouped = df.groupby("periodo_letivo", dropna=True)
 
-        out = (
-            g["total"]
+        approved = (
+            grouped["total"]
             .agg(
                 media="mean",
                 mediana="median",
@@ -414,17 +421,182 @@ class RADAnalyticsService:
             .sort_values("periodo")
         )
 
-        # contagens úteis (opcional, mas geralmente ajudam)
-        extras = g.agg(
-            n_registros=("id", "count"),
-            n_docentes=("siape", pd.Series.nunique),
-        ).reset_index()
+        not_approved = (
+            grouped["total_nao_homologado"]
+            .agg(
+                media="mean",
+                mediana="median",
+                desvio_padrao="std",
+                minimo="min",
+                maximo="max",
+                soma="sum",
+            )
+            .reset_index()
+            .rename(columns={"periodo_letivo": "periodo"})
+            .sort_values("periodo")
+        )
 
-        out = out.merge(extras, left_on="periodo", right_on="periodo_letivo", how="left").drop(columns=["periodo_letivo"])
+        approved["desvio_padrao"] = approved["desvio_padrao"].fillna(0.0)
+        not_approved["desvio_padrao"] = not_approved["desvio_padrao"].fillna(0.0)
 
-        # std pode ser NaN quando só há 1 registro no período
-        out["desvio_padrao"] = out["desvio_padrao"].fillna(0.0)
+        approved = approved.to_dict(orient="records")
+        not_approved = not_approved.to_dict(orient="records")
 
-        # JSON-serializável
-        return out.to_dict(orient="records")
+        return {"homologado": approved, "nao_homologado": not_approved}
+        return approved
 
+    async def activities_distribution(
+        self,
+        session: AsyncSession,
+        campus: Optional[str] = None,
+        start_period: Optional[str] = None,
+        end_period: Optional[str] = None,
+    ):
+        _, _, base = await self.load(session)
+        df = base.copy()
+
+        periods = base["periodo_letivo"].unique().tolist()
+
+        # Só homologado
+        df = df[df["situacao"] == "Homologado"]
+
+        # Filtro por campus
+        if campus:
+            df = df[df["campus"] == campus]
+
+        # Filtro por faixa de períodos
+        if start_period in periods and end_period in periods:
+            start_idx = periods.index(start_period)
+            end_idx = periods.index(end_period)
+
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+
+            selected_periods = periods[start_idx : end_idx + 1]
+            df = df[df["periodo_letivo"].isin(selected_periods)]
+
+        if df.empty:
+            return {}
+
+        # Colunas das atividades
+        activity_cols = [
+            "aula",
+            "ensino",
+            "capacitacao",
+            "pesquisa",
+            "extensao",
+            "administracao_r",
+        ]
+
+        activity_cols = [c for c in activity_cols if c in df.columns]
+
+        if not activity_cols:
+            return {}
+
+        df[activity_cols] = df[activity_cols].apply(pd.to_numeric, errors="coerce")
+
+        # Média geral de cada atividade
+        means = df[activity_cols].sum().fillna(0.0)
+
+        return {col: float(means[col]) for col in activity_cols}
+
+    async def activities_by_period(
+        self,
+        session: AsyncSession,
+        campus: Optional[str] = None,
+        start_period: Optional[str] = None,
+        end_period: Optional[str] = None,
+    ):
+        _, _, base = await self.load(session)
+        df = base.copy()
+
+        periods = base["periodo_letivo"].unique().tolist()
+        
+        if start_period in periods and end_period in periods:
+            start_idx = periods.index(start_period)
+            end_idx = periods.index(end_period)
+
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+
+            selected_periods = periods[start_idx : end_idx + 1]
+            df = df[df["periodo_letivo"].isin(selected_periods)]
+
+        df = df[df["situacao"] == "Homologado"]
+
+        if campus:
+            df = df[df["campus"] == campus]
+
+        activity_cols = [
+            "aula",
+            "ensino",
+            "capacitacao",
+            "pesquisa",
+            "extensao",
+            "administracao_r",
+        ]
+
+        activity_cols = [c for c in activity_cols if c in df.columns]
+
+        if not activity_cols:
+            return {}
+
+        df[activity_cols] = df[activity_cols].apply(pd.to_numeric, errors="coerce")
+
+        grouped = (
+            df.groupby("periodo_letivo", dropna=True)[activity_cols].sum().fillna(0.0)
+        )
+
+        return grouped.to_dict(orient="index")
+
+    async def docents_by_activity(
+        self,
+        session: AsyncSession,
+        campus: Optional[str] = None,
+        start_period: Optional[str] = None,
+        end_period: Optional[str] = None,
+    ):
+        _, _, base = await self.load(session)
+        df = base.copy()
+
+        periods = base["periodo_letivo"].unique().tolist()
+        
+        if start_period in periods and end_period in periods:
+            start_idx = periods.index(start_period)
+            end_idx = periods.index(end_period)
+
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+
+            selected_periods = periods[start_idx : end_idx + 1]
+            df = df[df["periodo_letivo"].isin(selected_periods)]
+
+        df = df[df["situacao"] == "Homologado"]
+
+        if campus:
+            df = df[df["campus"] == campus]
+
+        activity_cols = [
+            "aula",
+            "ensino",
+            "capacitacao",
+            "pesquisa",
+            "extensao",
+        ]
+
+        activity_cols = [c for c in activity_cols if c in df.columns]
+
+        if not activity_cols:
+            return {}
+
+        df[activity_cols] = df[activity_cols].apply(pd.to_numeric, errors="coerce")
+
+        grouped = df.groupby("periodo_letivo", dropna=True)
+        result = {}
+        for period, group in grouped:
+            counts = {}
+            for col in activity_cols:
+                counts[col] = group[group[col] > 0]['siape'].nunique()
+            result[period] = counts
+
+        return result
