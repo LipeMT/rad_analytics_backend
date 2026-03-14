@@ -478,17 +478,8 @@ class RADAnalyticsService:
         if df.empty:
             return {}
 
-        # Colunas das atividades
-        activity_cols = [
-            "aula",
-            "ensino",
-            "capacitacao",
-            "pesquisa",
-            "extensao",
-            "administracao_r",
-        ]
-
-        activity_cols = [c for c in activity_cols if c in df.columns]
+        # Colunas das atividades a partir de ACTIVITY_COLS
+        activity_cols = [c for c in ACTIVITY_COLS if c in df.columns]
 
         if not activity_cols:
             return {}
@@ -527,16 +518,7 @@ class RADAnalyticsService:
         if campus:
             df = df[df["campus"] == campus]
 
-        activity_cols = [
-            "aula",
-            "ensino",
-            "capacitacao",
-            "pesquisa",
-            "extensao",
-            "administracao_r",
-        ]
-
-        activity_cols = [c for c in activity_cols if c in df.columns]
+        activity_cols = [c for c in ACTIVITY_COLS if c in df.columns]
 
         if not activity_cols:
             return {}
@@ -576,15 +558,7 @@ class RADAnalyticsService:
         if campus:
             df = df[df["campus"] == campus]
 
-        activity_cols = [
-            "aula",
-            "ensino",
-            "capacitacao",
-            "pesquisa",
-            "extensao",
-        ]
-
-        activity_cols = [c for c in activity_cols if c in df.columns]
+        activity_cols = [c for c in ACTIVITY_COLS if c in df.columns]
 
         if not activity_cols:
             return {}
@@ -596,7 +570,67 @@ class RADAnalyticsService:
         for period, group in grouped:
             counts = {}
             for col in activity_cols:
-                counts[col] = group[group[col] > 0]['siape'].nunique()
+                counts[col] = group[group[col] > 0]["siape"].nunique()
             result[period] = counts
+
+        return result
+
+    async def docents_by_activities_intersection(
+        self,
+        session: AsyncSession,
+        activities: Optional[Iterable[str]] = None,
+        campus: Optional[str] = None,
+        start_period: Optional[str] = None,
+        end_period: Optional[str] = None,
+    ):
+        """Retorna número de docentes por período que têm horas em todas as atividades listadas."""
+        _, _, base = await self.load(session)
+        df = base.copy()
+
+        periods = base["periodo_letivo"].unique().tolist()
+
+        if start_period in periods and end_period in periods:
+            start_idx = periods.index(start_period)
+            end_idx = periods.index(end_period)
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+            selected_periods = periods[start_idx : end_idx + 1]
+            df = df[df["periodo_letivo"].isin(selected_periods)]
+
+        df = df[df["situacao"] == "Homologado"]
+
+        if campus:
+            df = df[df["campus"] == campus]
+
+        default_activities = [c for c in ACTIVITY_COLS if c in df.columns]
+        activity_cols = list(activities) if activities else default_activities
+        activity_cols = [c for c in activity_cols if c in ACTIVITY_COLS and c in df.columns]
+
+        if not activity_cols:
+            return {}
+
+        df[activity_cols] = df[activity_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
+        # Somar por docente+período e contar docentes que têm >0 em todas as atividades
+        docents = (
+            df.groupby(["periodo_letivo", "siape"], dropna=False)[activity_cols]
+            .sum()
+            .reset_index()
+        )
+
+        docents["all_positive"] = docents[activity_cols].gt(0).all(axis=1)
+
+        intersection = (
+            docents[docents["all_positive"]]
+            .groupby("periodo_letivo")
+            ["siape"]
+            .nunique()
+            .to_dict()
+        )
+
+        # Garantir todos os períodos presentes, mesmo com 0
+        result = {}
+        for period in sorted(docents["periodo_letivo"].unique(), key=str):
+            result[period] = int(intersection.get(period, 0))
 
         return result

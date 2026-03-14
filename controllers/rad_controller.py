@@ -59,4 +59,20 @@ class RADController:
         session: AsyncSession,
     ):
         return await service.docents_by_activity(session=session, campus=campus, start_period=start_period, end_period=end_period)
+
+    @staticmethod
+    async def docents_by_activities_intersection(
+        campus,
+        activities,
+        start_period,
+        end_period,
+        session: AsyncSession,
+    ):
+        return await service.docents_by_activities_intersection(
+            session=session,
+            campus=campus,
+            activities=activities,
+            start_period=start_period,
+            end_period=end_period,
+        )
     

@@ -78,3 +78,20 @@ async def get_docents_by_activity(
         end_period=end_period,
         session=session,
     )
+
+
+@router.get("/docents_by_activities_intersection")
+async def get_docents_by_activities_intersection(
+    campus: Optional[str] = Query(default=None),
+    activities: Optional[List[str]] = Query(default=None),
+    start_period: Optional[str] = Query(default=None),
+    end_period: Optional[str] = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    return await RADController.docents_by_activities_intersection(
+        campus=campus,
+        activities=activities,
+        start_period=start_period,
+        end_period=end_period,
+        session=session,
+    )
